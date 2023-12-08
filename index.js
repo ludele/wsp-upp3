@@ -43,7 +43,7 @@ async function handleRequest(request, response) {
             mongoConn = await MongoClient.connect("mongodb://127.0.0.1:27017");
             console.log("MongoDB Connected successfully!");
         }
-        let db = mongoConn.db("lektion6");
+        let db = mongoConn.db("forum");
 
         let result = await db.collection("posts").insertOne({
             title: title,
@@ -59,54 +59,70 @@ async function handleRequest(request, response) {
             mongoConn = await MongoClient.connect("mongodb://127.0.0.1:27017");
             console.log("MongoDB Connected successfully!");
         }
-        let db = mongoConn.db("lektion6");
+        let db = mongoConn.db("forum");
 
         return await db.collection("posts").findOne({
             _id: new ObjectId(postId)
         });
     }
 
-    function generatePostHTML(post) {
-        return `
-          <div class="post">
-              <h2 class="post-title"><a href="/post?postid=${post._id}">${post.title}</a></h2>
-              <p class="box">${post.text.substring(0, 100)}</p>
-          </div>
-      `;
+    async function replacePlaceholdersByDictionary(template, placeholders) {
+        return template.replace(/%\w+%/g, match => {
+            const placeholderKey = match.slice(1, -1); 
+            const replacement = placeholders[placeholderKey] || match;
+            return replacement !== undefined ? replacement : match;
+        });
     }
 
-    async function renderPostsPreviews(posts) {
-        let template = (await fs.readFile("./templates/postspreviews.maru")).toString();
-        let previewsHTML = posts.map(post => generatePostHTML(post)).join('');
-        template = template.replace(/%previews%/g, previewsHTML);
-        return template;
-    }
-
+    async function renderIndexTemplate(title, dynamicLinks) {
+        try {
+            let template = (await fs.readFile("./templates/index.maru")).toString();
+            console.log("Template before replacement:", template);
+    
+            const placeholders = {
+                title: title,
+                DynamicLinks: dynamicLinks,
+            };
+            template = await replacePlaceholdersByDictionary(template, placeholders);
+    
+            console.log("Template after replacement:", template);
+            return template;
+        } catch (error) {
+            console.error("Error rendering index template:", error.message);
+            throw error;
+        }
+    }    
+    
     async function renderPost(post) {
         let template = (await fs.readFile("./templates/post.maru")).toString();
-        template = template.replace(/%title%/g, post.title);
-        template = template.replace(/%text%/g, post.text);
+        const placeholders = { title: post.title, text: post.text };
+        template = await replacePlaceholdersByDictionary(template, placeholders);
         return template;
     }
 
     async function renderPostsPreviews(posts) {
         let template = (await fs.readFile("./templates/postspreviews.maru")).toString();
         let previewsHTML = "";
-
+    
         posts.forEach(post => {
+            const postPlaceholders = {
+                post_id: post._id,
+                post_title: post.title,
+                post_text: post.text.substring(0, 1000),
+            };
+    
             previewsHTML += `
-            <div class="box">
-                <h2>
-                    <a href="/post?postid=${post._id}">${post.title}</a>
-                </h2>
+                <div class="box">
+                    <h2>
+                        <a href="/post?postid=${postPlaceholders.post_id}">${postPlaceholders.post_title}</a>
+                    </h2>
                     <p>
-                        ${post.text.substring(0, 1000)} ...
+                        ${postPlaceholders.post_text} ...
                     </p>
-            </div>`;
+                </div>`;
         });
-
-        template = template.replace(/%previews%/g, previewsHTML);
-        return template;
+    
+        return await replacePlaceholdersByDictionary(template, { previews: previewsHTML });
     }
 
     if (request.url.startsWith('/public/')) {
@@ -124,18 +140,17 @@ async function handleRequest(request, response) {
         });
 
         if (pathSegments.length === 0) {
-            let template = (await fs.readFile("./templates/index.maru")).toString();
+            const title = "Forum";
 
             const links = [
                 { text: "Write a Post", href: "/writepost" },
                 { text: "All Posts", href: "/posts" },
             ];
-
+        
             const dynamicLinks = links.map(link => `<li><a href="${link.href}">${link.text}</a></li>`).join('');
-
-            template = template.replace("%title%", "Forum");
-            template = template.replace("%DynamicLinks%", dynamicLinks);
-
+        
+            const template = await renderIndexTemplate(title, dynamicLinks);
+        
             statusCodeResponse(200, template, "text/html");
             console.log("Request Handled Successfully");
             return;
@@ -185,7 +200,7 @@ async function handleRequest(request, response) {
                     mongoConn = await MongoClient.connect("mongodb://127.0.0.1:27017");
                     console.log("MongoDB Connected successfully");
                 }
-                let db = mongoConn.db("lektion6");
+                let db = mongoConn.db("forum");
 
                 let allPosts = await db.collection("posts").find().toArray();
 
